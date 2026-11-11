@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Alchimie infinie</title>
+<style>
+:root{--bg:#f3efe6;--panel:#e8e2d3;--ink:#2a2620;--mut:#7a7262;--chip:#fffdf7;--line:#cfc6b1;--acc:#2f6f5e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root{--bg:#1b1d1c;--panel:#252827;--ink:#ece7da;--mut:#948d7c;--chip:#303433;--line:#3d423f;--acc:#7fd1b9}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:Georgia,"Times New Roman",serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+#app{display:flex;flex-direction:column;height:100%}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0}
+#count{color:var(--mut);font-size:14px}
+button{font:inherit;color:inherit;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+#canvas{flex:1;position:relative;overflow:hidden}
+#hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mut);padding:30px;pointer-events:none;font-style:italic}
+#bar{background:var(--panel);border-top:1px solid var(--line);padding:6px 8px 0}
+#q{width:100%;padding:7px 10px;font:inherit;font-size:14px;background:var(--chip);color:var(--ink);border:1px solid var(--line);border-radius:8px}
+#shelf{background:var(--panel);max-height:32vh;overflow-y:auto;padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start}
+.chip,.item{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border:1px solid var(--line);border-radius:6px 14px 6px 14px;padding:6px 10px;font-size:15px;touch-action:none;white-space:nowrap;cursor:grab}
+.item{position:absolute;box-shadow:0 2px 0 var(--line);z-index:1}
+.item.drag{z-index:5;border-color:var(--acc)}
+.item.pop{animation:pop .35s}
+@keyframes pop{0%{transform:scale(.6)}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tab{flex:1;border:0;border-radius:0;background:none;padding:10px;font-size:15px;color:var(--mut);border-bottom:3px solid transparent}
+.tab.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:700}
+#coll{display:none;flex:1;overflow-y:auto;padding:12px}
+#app[data-tab=coll] #canvas,#app[data-tab=coll] #bar,#app[data-tab=coll] #shelf{display:none}
+#app[data-tab=coll] #coll{display:block}
+.prog{height:8px;background:var(--panel);border-radius:4px;overflow:hidden;margin:6px 0 14px}
+.prog i{display:block;height:100%;background:var(--acc)}
+#coll h3{margin:16px 0 8px;font-size:16px;display:flex;align-items:center;gap:8px}
+#coll h3 small{margin-left:auto;color:var(--mut);font-weight:400;font-size:13px}
+.grid{display:flex;flex-wrap:wrap;gap:6px}
+.grid .chip{cursor:default;touch-action:auto}
+.none{color:var(--mut);font-style:italic;font-size:14px}
+.ic{width:20px;height:20px;flex:none}
+#toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 58px);transform:translateX(-50%);background:var(--acc);color:var(--bg);padding:6px 14px;border-radius:20px;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9}
+#toast.on{opacity:1}
+dialog{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:12px;max-width:340px;width:90%}
+dialog input{width:100%;padding:8px;margin:8px 0;font:inherit;background:var(--chip);color:var(--ink);border:1px solid var(--line);border-radius:6px}
+dialog p{font-size:13px;color:var(--mut);margin:6px 0}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div><h1>Alchimie infinie</h1><span id="count"></span></div>
+    <button id="cfg" aria-label="Réglages">Réglages</button>
+  </header>
+  <div class="tabs"><button class="tab on" data-t="game">Jeu</button><button class="tab" data-t="coll">Collection</button></div>
+  <div id="coll"></div>
+  <div id="canvas"><div id="hint">Glisse des éléments ici,<br>puis pose-en un sur un autre.</div></div>
+  <div id="bar"><input id="q" placeholder="Chercher un élément" autocomplete="off"></div>
+  <div id="shelf"></div>
+</div>
+<div id="toast"></div>
+<dialog id="dlg">
+  <b>Réglages</b>
+  <p>Mode IA (optionnel) : colle une clé API Anthropic pour que chaque combinaison inconnue soit inventée par Claude. La clé reste dans ton navigateur mais n'est pas secrète pour un site public : réserve-la à ton usage.</p>
+  <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off">
+  <div class="row"><button id="reset">Tout effacer</button><button id="save">Fermer</button></div>
+</dialog>
+<script>
+const $=s=>document.querySelector(s);
+const store={
+  get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+};
+const IC={
+w:"M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z",
+f:"M12 3c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-4-1-6 1-10z",
+p:"M5 19c0-8 5-14 15-14 0 10-6 15-14 15M5 19l8-8",
+r:"M2 20l7-12 4 6 3-4 6 10z",
+c:"M7 18a4 4 0 0 1 0-8 5 5 0 0 1 10 1 3.5 3.5 0 0 1 0 7z",
+e:"M13 2L5 14h6l-1 8 8-12h-6z",
+s:"M12 3l2.5 6 6.5.5-5 4.2 1.6 6.3L12 16.5 6.4 20l1.6-6.3-5-4.2 6.5-.5z",
+m:"M20 14A8 8 0 1 1 10 4a6.5 6.5 0 0 0 10 10z",
+g:"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2",
+h:"M12 4a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM5 21c0-4 3-7 7-7s7 3 7 7",
+a:"M12 13c-3 0-5 2-5 4.5 0 1.5 1.5 2 3 1.5l2-.5 2 .5c1.5.5 3 0 3-1.5 0-2.500-2-4.500-5-4.500zM5 10l1-2M9 6l.5-2M15 6l-.5-2M19 10l-1-2",
+b:"M3 11l9-8 9 8M5 10v10h14V10M10 20v-6h4v6",
+j:"M6 3h12l4 6-10 12L2 9zM2 9h20M9 3l3 6 3-6",
+k:"M4 4h7a3 3 0 0 1 1 .5A3 3 0 0 1 13 4h7v15h-7a2 2 0 0 0-2 1 2 2 0 0 0-2-1H4zM12 5v15",
+t:"M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
+o:"M4 20l9-9M11 5l4-2 5 5-2 4-3-1-5-5z"
+};
+const START=[["Eau","w"],["Feu","f"],["Terre","r"],["Air","c"],["Lumière","s"],["Ombre","m"],["Métal","g"],["Bois","p"],["Électricité","e"],["Temps","t"]].map(([n,c])=>({n,c,b:n}));
+const RAW=`Eau+Feu=Vapeur:c;Eau+Terre=Boue:r;Air+Eau=Nuage:c;Feu+Terre=Lave:f;Air+Feu=Fumée:c;Air+Terre=Poussière:r;Eau+Eau=Lac:w;Lac+Lac=Océan:w;Feu+Feu=Incendie:f;Terre+Terre=Montagne:r;Air+Air=Vent:c;Eau+Nuage=Pluie:w;Nuage+Nuage=Orage:e;Électricité+Nuage=Éclair:e;Eau+Lave=Pierre:r;Pierre+Pierre=Mur:b;Boue+Feu=Brique:b;Pluie+Terre=Plante:p;Plante+Plante=Forêt:p;Feu+Forêt=Charbon:r;Eau+Plante=Algue:p;Océan+Terre=Île:r;Boue+Plante=Marais:p;Feu+Pierre=Forge:b;Feu+Métal=Épée:o;Métal+Métal=Machine:g;Aimant+Aimant=Boussole:g;Électricité+Métal=Aimant:e;Électricité+Machine=Robot:g;Plante+Terre=Arbre:p;Bois+Bois=Cabane:b;Cabane+Cabane=Village:b;Village+Village=Ville:b;Eau+Pierre=Sable:r;Feu+Sable=Verre:j;Lumière+Pluie=Arc-en-ciel:s;Feu+Nuage=Soleil:s;Lumière+Lumière=Étoile:s;Constellation+Étoile=Galaxie:s;Étoile+Étoile=Constellation:s;Étoile+Ombre=Nuit:m;Lumière+Nuit=Aube:s;Ombre+Ombre=Obscurité:m;Eau+Vent=Vague:w;Eau+Montagne=Rivière:w;Air+Montagne=Neige:w;Eau+Neige=Glace:w;Glace+Glace=Glacier:w;Feu+Montagne=Volcan:f;Électricité+Marais=Vie:p;Boue+Vie=Humain:h;Humain+Humain=Famille:h;Armure+Humain=Chevalier:h;Humain+Métal=Armure:o;Eau+Humain=Pêcheur:h;Feu+Humain=Cuisinier:h;Bois+Humain=Charpentier:h;Humain+Pierre=Sculpteur:h;Humain+Plante=Jardinier:h;Humain+Temps=Histoire:k;Humain+Lumière=Idée:k;Idée+Machine=Ordinateur:g;Temps+Temps=Éternité:t;Pierre+Temps=Fossile:r;Plante+Temps=Graine:p;Graine+Plante=Blé:p;Blé+Pierre=Farine:p;Eau+Farine=Pâte:p;Feu+Pâte=Pain:p;Eau+Vie=Poisson:a;Air+Vie=Oiseau:a;Terre+Vie=Animal:a;Feu+Vie=Dragon:a;Animal+Animal=Troupeau:a;Animal+Forêt=Loup:a;Humain+Loup=Chien:a;Chien+Chien=Meute:a;Animal+Plante=Vache:a;Humain+Vache=Fermier:h;Fermier+Terre=Ferme:b;Ferme+Ferme=Domaine:b;Animal+Montagne=Chèvre:a;Animal+Océan=Baleine:a;Poisson+Poisson=Banc de poissons:a;Animal+Ombre=Chat:a;Oiseau+Oiseau=Nuée:a;Arbre+Oiseau=Nid:b;Humain+Oiseau=Fauconnier:h;Lumière+Plante=Fleur:p;Animal+Fleur=Abeille:a;Abeille+Fleur=Miel:p;Abeille+Abeille=Ruche:b;Fleur+Fleur=Bouquet:p;Fleur+Humain=Fleuriste:h;Animal+Humain=Éleveur:h;Animal+Feu=Viande:p;Pain+Viande=Sandwich:p;Eau+Vache=Lait:w;Lait+Temps=Fromage:p;Fromage+Pâte=Pizza:p;Arbre+Lumière=Fruit:p;Eau+Fruit=Jus:w;Fruit+Temps=Vin:w;Fruit+Fruit=Salade de fruits:p;Animal+Marais=Serpent:a;Eau+Serpent=Venin:w;Humain+Ville=Citoyen:h;Citoyen+Citoyen=Foule:h;Foule+Idée=Révolution:k;Ville+Ville=Pays:b;Pays+Pays=Continent:r;Humain+Pays=Roi:h;Roi+Roi=Empire:b;Humain+Épée=Soldat:h;Soldat+Soldat=Armée:h;Pierre+Roi=Château:b;Château+Château=Forteresse:b;Château+Dragon=Légende:k;Pierre+Rivière=Pont:b;Océan+Ville=Port:b;Bateau+Port=Flotte:g;Humain+Bateau=Marin:h;Marin+Marin=Équipage:h;Marin+Ombre=Pirate:h;Pirate+Trésor=Butin:j;Lumière+Port=Phare:b;Métal+Océan=Bateau:g;Métal+Oiseau=Avion:g;Métal+Étoile=Fusée:g;Humain+Étoile=Astronaute:h;Astronaute+Fusée=Mission:k;Dragon+Montagne=Trésor:j;Humain+Ombre=Fantôme:m;Fantôme+Nuit=Cauchemar:m;Humain+Idée=Rêve:k;Nuit+Rêve=Fable:k;Lumière+Verre=Lentille:j;Lentille+Lentille=Télescope:g;Étoile+Télescope=Astronomie:k;Humain+Lentille=Savant:h;Idée+Savant=Science:k;Machine+Science=Technologie:g;Humain+Savant=Médecin:h;Médecin+Plante=Remède:p;Médecin+Venin=Antidote:w;Plante+Savant=Botaniste:h;Animal+Savant=Zoologiste:h;Pierre+Savant=Géologue:h;Feu+Savant=Chimiste:h;Fossile+Savant=Paléontologue:h;Idée+Idée=Théorie:k;Ombre+Temps=Mémoire:k;Machine+Mémoire=Intelligence:k;Intelligence+Robot=Androïde:g;Ordinateur+Ordinateur=Réseau:g;Idée+Réseau=Internet:k;Humain+Ordinateur=Programmeur:h;Humain+Machine=Ingénieur:h;Électricité+Verre=Ampoule:s;Ampoule+Idée=Invention:k;Humain+Invention=Inventeur:h;Bois+Métal=Outil:o;Outil+Pierre=Mine:b;Humain+Mine=Mineur:h;Humain+Outil=Artisan:h;Outil+Terre=Pelle:o;Feu+Outil=Marteau:o;Marteau+Pierre=Statue:r;Arbre+Outil=Hache:o;Bois+Hache=Planche:p;Planche+Planche=Charpente:b;Outil+Planche=Meuble:b;Métal+Planche=Roue:g;Planche+Roue=Chariot:g;Machine+Roue=Moteur:g;Chariot+Moteur=Voiture:g;Voiture+Voiture=Embouteillage:g;Outil+Rivière=Moulin:b;Air+Bois=Flûte:o;Flûte+Humain=Musicien:h;Musicien+Musicien=Orchestre:h;Idée+Musicien=Chanson:k;Chanson+Chanson=Album:k;Foule+Musicien=Concert:k;Humain+Éclair=Sorcier:h;Arbre+Idée=Livre:k;Livre+Livre=Bibliothèque:b;Humain+Livre=Écrivain:h;Écrivain+Idée=Roman:k;Livre+Sorcier=Grimoire:k;Fantôme+Sorcier=Nécromancien:h;Sorcier+Étoile=Astrologue:h;Eau+Sorcier=Potion:w;Pierre+Sorcier=Golem:g;Rêve+Sorcier=Illusion:m;Métal+Sorcier=Alchimiste:h;Alchimiste+Métal=Or:j;Or+Or=Lingot:j;Couronne+Roi=Royaume:b;Or+Roi=Couronne:j;Charbon+Temps=Diamant:j;Diamant+Or=Bijou:j;Bijou+Humain=Joaillier:h;Ombre+Vie=Mort:m;Humain+Mort=Squelette:m;Mort+Plante=Compost:p;Compost+Terre=Terreau:p;Soleil+Terre=Désert:r;Désert+Eau=Oasis:p;Désert+Vent=Dune:r;Soleil+Soleil=Canicule:f;Neige+Neige=Avalanche:w;Humain+Neige=Bonhomme de neige:w;Air+Glace=Blizzard:w;Vent+Vent=Tornade:c;Océan+Vent=Ouragan:c;Océan+Tempête=Tsunami:w;Montagne+Montagne=Chaîne de montagnes:r;Rivière+Temps=Canyon:r;Rivière+Rivière=Fleuve:w;Montagne+Rivière=Cascade:w;Électricité+Rivière=Barrage:b;Barrage+Électricité=Énergie:e;Énergie+Ville=Réseau électrique:g;Électricité+Orage=Tempête:e;Électricité+Électricité=Foudre:e;Lave+Lave=Magma:f;Air+Magma=Obsidienne:j;Feu+Ombre=Cendre:r;Bois+Feu=Torche:f;Bois+Eau=Radeau:b;Lumière+Métal=Miroir:j;Nuit+Pierre=Lune:m;Fusée+Lune=Alunissage:k;Constellation+Constellation=Univers:s;Étoile+Terre=Planète:r;Planète+Planète=Système solaire:s;Étoile+Pierre=Météorite:r;Fossile+Vie=Dinosaure:a;Dinosaure+Météorite=Extinction:m;Étoile+Obscurité=Trou noir:m;Temps+Trou noir=Paradoxe:t;Métal+Temps=Horloge:t;Horloge+Horloge=Calendrier:t;Sable+Temps=Sablier:t;Horloge+Humain=Horloger:h;Horloge+Outil=Montre:t;Eau+Fleur=Parfum:w;Eau+Sable=Plage:r;Humain+Plage=Touriste:h;Verre+Verre=Fenêtre:b;Fenêtre+Mur=Maison:b;Brique+Mur=Maison:b;Maison+Maison=Rue:b;Rue+Rue=Quartier:b;Humain+Maison=Habitant:h;Mur+Mur=Enceinte:b;Brique+Planche=Toit:b;Mur+Toit=Maison:b;Jardinier+Terre=Jardin:p;Jardin+Maison=Villa:b;Médecin+Ville=Hôpital:b;Savant+Ville=Université:b;Soldat+Ville=Caserne:b;Pain+Ville=Boulangerie:b;Arbre+Ville=Parc:p;Fleur+Ville=Parc:p;Machine+Vapeur=Machine à vapeur:g;Chariot+Machine à vapeur=Locomotive:g;Chariot+Locomotive=Train:g;Train+Ville=Gare:b;Avion+Ville=Aéroport:b;Humain+Voiture=Conducteur:h;Avion+Humain=Pilote:h;Pièce+Ville=Marché:b;Marteau+Or=Pièce:j;Idée+Pièce=Économie:k;Idée+Roi=Loi:k;Livre+Loi=Constitution:k;Foule+Loi=Démocratie:k;Idée+Terre=Carte:k;Boussole+Carte=Navigation:k;Boussole+Marin=Explorateur:h;Carte+Marin=Explorateur:h;Livre+Savant=Encyclopédie:k;Moteur+Électricité=Moteur électrique:g;Électricité+Voiture=Voiture électrique:g;Énergie+Soleil=Panneau solaire:g;Énergie+Vent=Éolienne:g;Lune+Océan=Marée:w;Lune+Soleil=Éclipse:s;Étoile+Nuage=Nébuleuse:s;Nid+Oiseau=Œuf:a;Feu+Œuf=Omelette:p;Farine+Œuf=Gâteau:p;Farine+Lait=Crêpe:p;Fruit+Pâte=Tarte:p;Feu+Viande=Steak:p;Pain+Steak=Burger:p;Océan+Feu=Sel:j;Sel+Viande=Jambon:p;Feu+Poisson=Poisson grillé:p;Fruit+Plante=Vigne:p;Fruit+Vigne=Raisin:p;Raisin+Temps=Vin:w;Eau+Raisin=Jus:w;Temps+Œuf=Poussin:a;Poussin+Temps=Poule:a;Poule+Poule=Poulailler:b;Forêt+Humain=Bûcheron:h;Arbre+Humain=Bûcheron:h;Forêt+Neige=Taïga:p;Forêt+Lumière=Clairière:p;Montagne+Neige=Sommet:r;Humain+Sommet=Alpiniste:h;Montagne+Pierre=Falaise:r;Falaise+Océan=Côte:r;Montagne+Temps=Colline:r;Colline+Colline=Vallée:r;Plante+Vent=Herbe:p;Herbe+Herbe=Prairie:p;Animal+Prairie=Cheval:a;Cheval+Humain=Cavalier:h;Cheval+Chariot=Calèche:g;Chèvre+Prairie=Mouton:a;Humain+Mouton=Berger:h;Mouton+Outil=Laine:p;Laine+Outil=Tissu:p;Outil+Tissu=Vêtement:o;Tissu+Vent=Voile:o;Bateau+Voile=Voilier:g;Humain+Tissu=Tailleur:h;Océan+Vie=Plancton:a;Océan+Poisson=Requin:a;Feu+Oiseau=Phénix:a;Nuit+Oiseau=Hibou:a;Montagne+Oiseau=Aigle:a;Océan+Oiseau=Mouette:a;Air+Fleur=Papillon:a;Animal+Sable=Fourmi:a;Fourmi+Fourmi=Fourmilière:b;Humain+Pain=Boulanger:h;Humain+Viande=Boucher:h;Humain+Verre=Verrier:h;Humain+Or=Orfèvre:h;Humain+Raisin=Vigneron:h;Forge+Humain=Forgeron:h;Humain+Marteau=Forgeron:h;Eau+Pâte=Pâtes:p;Fromage+Pâtes=Gratin:p;Humain+Pizza=Pizzaiolo:h;Poisson+Sel=Poisson salé:p;Miel+Pain=Tartine:p;Eau+Miel=Hydromel:w;Glace+Lait=Crème glacée:w;Temps+Vin=Vinaigre:w;Blé+Humain=Paysan:h;Blé+Blé=Champ de blé:p;Champ de blé+Humain=Moissonneur:h;Outil+Plante=Faux:o;Champ de blé+Faux=Moisson:p;Blé+Moulin=Farine:p;Corail+Corail=Récif:r;Pierre+Plancton=Corail:a;Marais+Oiseau=Héron:a;Marais+Poisson=Grenouille:a;Animal+Désert=Chameau:a;Chameau+Humain=Nomade:h;Désert+Humain=Nomade:h;Désert+Plante=Cactus:p;Animal+Glacier=Ours polaire:a;Glacier+Oiseau=Pingouin:a;Chien+Neige=Chien de traîneau:a;Animal+Arbre=Écureuil:a;Fleur+Soleil=Tournesol:p;Outil+Tournesol=Huile:p;Feu+Verre=Lampe:s;Fruit+Feu=Compote:p;Fruit+Glace=Sorbet:p;Pluie+Pluie=Déluge:w;Terre+Vapeur=Brouillard:c;Fumée+Fumée=Smog:c;Smog+Ville=Pollution:c;Lentille+Métal=Microscope:g;Humain+Microscope=Biologiste:h;Science+Vie=Biologie:k;Science+Terre=Géologie:k;Feu+Science=Chimie:k;Électricité+Science=Physique:k;Animal+Science=Zoologie:k;Plante+Science=Botanique:k;Humain+Science=Médecine:k;Idée+Théorie=Philosophie:k;Humain+Philosophie=Philosophe:h;Histoire+Humain=Historien:h;Humain+Mémoire=Souvenir:k;Idée+Mémoire=Savoir:k;Humain+Savoir=Professeur:h;Professeur+Ville=École:b;École+Humain=Élève:h;Fleur+Pierre=Pigment:r;Eau+Pigment=Peinture:w;Humain+Peinture=Peintre:h;Mur+Peinture=Fresque:k;Idée+Peintre=Tableau:k;Tableau+Tableau=Musée:b;Livre+Musicien=Partition:k;Chanson+Humain=Chanteur:h;Écrivain+Foule=Théâtre:b;Humain+Théâtre=Acteur:h;Acteur+Lentille=Film:k;Film+Foule=Cinéma:b;Roue+Roue=Vélo:g;Humain+Vélo=Cycliste:h;Moteur+Vélo=Moto:g;Humain+Moto=Motard:h;Épée+Épée=Duel:k;Charbon+Sel=Poudre:r;Métal+Poudre=Canon:g;Feu+Poudre=Explosion:f;Bateau+Canon=Navire de guerre:g;Château+Fantôme=Château hanté:m;Fantôme+Maison=Maison hantée:m;Fusée+Planète=Exploration:k;Fusée+Machine=Satellite:g;Réseau+Satellite=Télécommunications:g;Galaxie+Trou noir=Quasar:s;Explosion+Étoile=Supernova:s;Énergie+Machine=Usine:b;Humain+Usine=Ouvrier:h;Usine+Usine=Zone industrielle:b;Fossile+Terre=Pétrole:r;Machine+Pétrole=Raffinerie:b;Pétrole+Usine=Carburant:f;Sable+Vent=Dune:r;Sable+Sable=Désert:r;Pierre+Sable=Béton:b;Béton+Béton=Immeuble:b;Immeuble+Immeuble=Gratte-ciel:b;Plante+Vapeur=Thé:w;Feu+Graine=Café:w;Livre+Machine=Imprimerie:g;Idée+Imprimerie=Journal:k;Air+Électricité=Radio:g;Lentille+Radio=Télévision:g;Ordinateur+Radio=Smartphone:g;Remède+Science=Vaccin:w;Carte+Trésor=Chasse au trésor:k;Bateau+Pirate=Navire pirate:g;Bateau+Moteur=Paquebot:g;Avion+Moteur=Avion à réaction:g;Air+Outil=Hélice:o;Hélice+Moteur=Hélicoptère:g;Rue+Voiture=Route:b;Route+Route=Autoroute:b;Montagne+Route=Tunnel:b;Cheval+Roue=Charrette:g;Charrette+Humain=Cocher:h;Humain+Prairie=Berger:h`;
+const MODS={Eau:"sous l'eau",Feu:"en flammes",Terre:"sous terre",Air:"dans les airs",Lumière:"dans la lumière",Ombre:"dans l'ombre",Métal:"en métal",Bois:"en bois",Électricité:"électrique",Temps:"d'autrefois",Glace:"sous la glace",Pierre:"en pierre",Verre:"en verre",Boue:"dans la boue",Neige:"sous la neige",Vent:"dans le vent",Nuit:"de nuit",Soleil:"au soleil",Pluie:"sous la pluie"};
+const RS={};
+const pk=(a,b)=>[a,b].sort((x,y)=>x.localeCompare(y)).join("|");
+RAW.split(";").forEach(x=>{const[p,r]=x.split("=");const[n,c]=r.split(":");const[a,b]=p.split("+");RS[pk(a,b)]={n,c,b:n}});
+const elide=w=>/^[aeiouhéèêàâîôûAEIOUHÉÈÊÀÂÎÔÛ]/.test(w)?"d'"+w:"de "+w;
+const w1=s=>s.split(" ")[0];
+const META={};
+function info(n){return META[n]||{c:"s",b:n}}
+function rule(a,b){
+  const ia=info(a),ib=info(b),ma=MODS[a],mb=MODS[b];
+  if(ma&&mb)return{n:`Fusion ${w1(a)}-${w1(b)}`,c:ia.c};
+  if(ma||mb){
+    const el=ma?a:b,th=ma?b:a,ti=info(th);
+    if(th==="Humain")return{n:`Maître ${elide(el)}`,c:"h"};
+    return{n:`${ti.b} ${MODS[el]}`,c:ti.c,b:ti.b};
+  }
+  let x=ia,y=ib,bx=ia.b,by=ib.b,r;
+  const pair=(c1,c2)=>(x.c===c1&&y.c===c2)?[x,y]:(x.c===c2&&y.c===c1)?[y,x]:null;
+  const isMat=c=>"jgr".includes(c);
+  if(x.c===y.c){
+    const T={a:"Chimère",p:"Hybride",b:"Complexe",j:"Alliage",g:"Alliage",r:"Alliage",h:"Équipe",k:"Théorie",o:"Outil"}[x.c];
+    r=T?{n:`${T} ${w1(bx)}-${w1(by)}`,c:x.c}:{n:`${w1(bx)}-${w1(by)}`,c:x.c};
+  }else if(x.c==="h"||y.c==="h"){
+    const h=x.c==="h"?x:y,o=x.c==="h"?y:x,T={a:"Éleveur",p:"Cultivateur",j:"Artisan",g:"Artisan",r:"Artisan",o:"Artisan",k:"Spécialiste",b:"Gardien"}[o.c]||"Expert";
+    r={n:`${T} ${elide(o.b)}`,c:"h"};
+  }else if(isMat(x.c)&&(y.c==="b"||y.c==="o"))r={n:`${by} en ${bx}`,c:y.c};
+  else if(isMat(y.c)&&(x.c==="b"||x.c==="o"))r={n:`${bx} en ${by}`,c:x.c};
+  else if(x.c==="k"||y.c==="k"){const k=x.c==="k"?x:y,o=x.c==="k"?y:x;r={n:`Traité ${elide(o.b)}`,c:"k"}}
+  else if(x.c==="a"||y.c==="a"){const an=x.c==="a"?x:y,o=x.c==="a"?y:x;r={n:`${an.b} ${elide(o.b)}`,c:"a"}}
+  else r={n:`${bx} ${elide(by)}`,c:x.c};
+  if(r.n.length>34)r.n=`${w1(bx)}-${w1(by)}`;
+  return r;
+}
+
+
+let found=store.get("found3",START.slice());
+let cache=store.get("cache3",{});
+found.forEach(o=>META[o.n]=o);
+Object.values(RS).forEach(v=>{if(!META[v.n])META[v.n]=v});
+let busy=0;
+
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
+const color=n=>`hsl(${hash(n)%360} 55% 50%)`;
+function icon(c,n){return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="${color(n)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${IC[c]||IC.s}"/></svg>`}
+
+async function ai(a,b){
+  const key=store.get("apikey","");
+  if(!key)return null;
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({model:"claude-haiku-5-5",max_tokens:60,messages:[{role:"user",content:`Jeu d'alchimie. Combine "${a}" + "${b}" de façon logique. Réponds uniquement en JSON : {"n":"nom court en français (1 à 3 mots, sans emoji)","i":"une lettre parmi w=liquide f=feu p=plante r=roche c=air/nuage e=énergie s=lumière/astre m=ombre/mort g=machine h=personne a=animal b=bâtiment j=gemme/métal précieux k=savoir t=temps o=outil"}`}]})});
+    const d=await r.json();
+    const o=JSON.parse(d.content[0].text.replace(/```json|```/g,"").trim());
+    if(o.n){const n=String(o.n).replace(/[\p{Extended_Pictographic}]/gu,"").trim().slice(0,34);return{n,c:IC[o.i]?o.i:"s",b:n}}
+  }catch(e){}
+  return null;
+}
+async function combine(a,b){
+  const k=pk(a,b);
+  if(cache[k])return cache[k];
+  let r=RS[k]||await ai(a,b);
+  if(!r)return null;
+  cache[k]=r;store.set("cache3",cache);
+  return r;
+}
+
+function toast(t){const el=$("#toast");el.textContent=t;el.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove("on"),1500)}
+function mk(cls,n){const m=META[n]||{c:"s"};const d=document.createElement("div");d.className=cls;d.dataset.n=n;d.innerHTML=icon(m.c,n)+"<span></span>";d.lastChild.textContent=n;return d}
+function drawShelf(){
+  const s=$("#shelf"),q=$("#q").value.trim().toLowerCase();s.innerHTML="";
+  found.filter(o=>!q||o.n.toLowerCase().includes(q)).forEach(o=>{const c=mk("chip",o.n);c.onpointerdown=ev=>{ev.preventDefault();const r=$("#canvas").getBoundingClientRect();spawn(o.n,ev.clientX-r.left-30,ev.clientY-r.top-20,ev,true)};s.appendChild(c)});
+  $("#count").textContent=found.length+" éléments découverts";
+}
+function spawn(n,x,y,ev,drag){
+  $("#hint").style.display="none";
+  const it=mk("item",n);it.style.left=x+"px";it.style.top=y+"px";$("#canvas").appendChild(it);
+  it.onpointerdown=e=>{e.preventDefault();begin(it,e)};
+  if(drag)begin(it,ev,true);
+  return it;
+}
+function begin(it,e,fresh){
+  it.setPointerCapture(e.pointerId);it.classList.add("drag");
+  const r=$("#canvas").getBoundingClientRect();
+  const ox=fresh?it.offsetWidth/2:e.clientX-r.left-it.offsetLeft,oy=fresh?it.offsetHeight/2:e.clientY-r.top-it.offsetTop;
+  const mv=m=>{it.style.left=(m.clientX-r.left-ox)+"px";it.style.top=(m.clientY-r.top-oy)+"px"};
+  const up=async m=>{
+    it.removeEventListener("pointermove",mv);it.removeEventListener("pointerup",up);it.classList.remove("drag");
+    const sh=$("#bar").getBoundingClientRect();
+    if(m.clientY>sh.top){it.remove();return}
+    const tgt=document.elementsFromPoint(m.clientX,m.clientY).find(x=>x.classList.contains("item")&&x!==it);
+    if(tgt)await merge(it,tgt);
+  };
+  it.addEventListener("pointermove",mv);it.addEventListener("pointerup",up);mv(e);
+}
+async function merge(a,b){
+  if(busy)return;busy=1;
+  const x=b.offsetLeft,y=b.offsetTop;
+  b.style.opacity=a.style.opacity=".5";
+  const r=await combine(a.dataset.n,b.dataset.n);
+  if(!r){a.style.opacity=b.style.opacity="1";toast("Rien ne se passe");busy=0;return}
+  a.remove();b.remove();
+  META[r.n]=META[r.n]||r;
+  const it=spawn(r.n,x,y);it.classList.add("pop");
+  if(!found.some(f=>f.n===r.n)){found.push({n:r.n,c:r.c,b:r.b});store.set("found3",found);drawShelf();toast("Nouveau : "+r.n);$("#shelf").scrollTop=1e7}
+  busy=0;
+}
+$("#q").oninput=drawShelf;
+$("#cfg").onclick=()=>{$("#key").value=store.get("apikey","");$("#dlg").showModal()};
+$("#save").onclick=()=>{store.set("apikey",$("#key").value.trim());$("#dlg").close()};
+$("#reset").onclick=()=>{if(confirm("Effacer toute ta progression ?")){try{localStorage.removeItem("found3");localStorage.removeItem("cache3")}catch(e){}location.reload()}};
+
+const CAT={w:"Liquides et eaux",f:"Feu et chaleur",p:"Plantes et nourriture",r:"Roches et terres",c:"Air et météo",e:"Énergie",s:"Lumière et astres",m:"Ombre et mort",g:"Machines",h:"Personnes et métiers",a:"Animaux",b:"Bâtiments",j:"Gemmes et métaux précieux",k:"Savoir et idées",t:"Temps",o:"Outils"};
+function drawColl(){
+  const tot={},all=new Set();let T=0;
+  const add=o=>{if(all.has(o.n))return;all.add(o.n);tot[o.c]=(tot[o.c]||0)+1;T++};
+  START.forEach(add);Object.values(RS).forEach(add);
+  const by={};found.forEach(o=>{const c=(META[o.n]||o).c;(by[c]=by[c]||[]).push(o.n)});
+  const has=found.filter(o=>all.has(o.n)).length;
+  let h=`<b>${found.length} découverts</b> <span style="color:var(--mut)">(${has} sur ${T} recettes du jeu)</span><div class="prog"><i style="width:${Math.min(100,has/T*100)}%"></i></div>`;
+  Object.keys(CAT).sort((a,b)=>(by[b]||[]).length-(by[a]||[]).length).forEach(c=>{
+    const l=by[c]||[];
+    h+=`<h3>${icon(c,CAT[c])}${CAT[c]}<small>${l.length} / ${tot[c]||0}</small></h3><div class="grid" data-c="${c}">${l.length?"":'<span class="none">Rien de découvert ici pour l\'instant.</span>'}</div>`;
+  });
+  const box=$("#coll");box.innerHTML=h;
+  box.querySelectorAll(".grid").forEach(g=>(by[g.dataset.c]||[]).slice().sort((a,b)=>a.localeCompare(b)).forEach(n=>g.appendChild(mk("chip",n))));
+}
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));
+  $("#app").dataset.tab=b.dataset.t;
+  if(b.dataset.t==="coll")drawColl();
+});
+drawShelf();
+</script>
+</body>
+</html>
